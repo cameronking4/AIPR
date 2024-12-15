@@ -5,33 +5,49 @@ import difflib
 import re
 import json
 
-# Environment variables
-issue_title = os.environ["ISSUE_TITLE"]
-issue_body = os.environ["ISSUE_BODY"]
-open_ai_api_key = os.environ["OPENAI_API_KEY"]
-open_ai_tokens = os.environ["OPENAI_TOKENS"]
-open_ai_model = os.environ["OPENAI_MODEL"]
-chunks = os.environ["FILE_CHUNKS"]
+# Environment variables with default values and validation
+issue_title = os.getenv("ISSUE_TITLE", "Default Issue Title")
+issue_body = os.getenv("ISSUE_BODY", "Default issue description.")
+open_ai_api_key = os.getenv("OPENAI_API_KEY")
+open_ai_tokens = os.getenv("OPENAI_TOKENS", "200")
+open_ai_model = os.getenv("OPENAI_MODEL", "gpt-4o")
+chunks = os.getenv("FILE_CHUNKS", "0")
 directory = os.getenv("TARGET_DIRECTORY", "./")  # Default to current directory if not specified
 
-# Step 1: Set up OpenAI API client
+# Validate essential environment variables
+if not open_ai_api_key:
+    raise ValueError("The OPENAI_API_KEY environment variable is not set.")
+
+# Convert numeric environment variables to integers with error handling
+try:
+    open_ai_tokens = int(open_ai_tokens)
+except ValueError:
+    raise ValueError("OPENAI_TOKENS must be an integer.")
+
+try:
+    chunks = int(chunks)
+except ValueError:
+    raise ValueError("FILE_CHUNKS must be an integer.")
+
+# Set up OpenAI API client
 openai.api_key = open_ai_api_key
 question = issue_body
 
-# Step 2: Read all files from a local repository
+# Function to read all files from a local repository
 def read_all_files_from_directory(directory):
     file_contents = {}
     for root, _, files in os.walk(directory):
         for file in files:
             filepath = os.path.join(root, file)
-            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                file_contents[filepath] = f.read()
+            try:
+                with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                    file_contents[filepath] = f.read()
+            except Exception as e:
+                print(f"Error reading file {filepath}: {e}")
     return file_contents
 
+# Function to split text into chunks
 def split_into_chunks(text, chunk_size):
-    """
-    Splits a text into chunks, each of a maximum size of chunk_size.
-    """
     chunks = []
     while text:
         chunk = text[:chunk_size]
@@ -39,63 +55,63 @@ def split_into_chunks(text, chunk_size):
         chunks.append(chunk)
     return chunks
 
-# Step 3: Query OpenAI for changes
+# Function to request changes from OpenAI
 def request_changes_from_openai(context, filename):
     try:
         response = openai.Completion.create(
-            model=open_ai_model or "gpt-4o",
-            prompt=f"Giving the filename:'{filename}' and the following content:'{context}'\n modify the content to provide a solution for this issue:\n'{question}'\n and output the result.",
-            max_tokens=int(open_ai_tokens) or 200
+            model=open_ai_model,
+            prompt=(
+                f"Given the filename: '{filename}' and the following content:\n"
+                f"'{context}'\n"
+                f"Modify the content to provide a solution for this issue:\n"
+                f"'{question}'\n"
+                f"and output the result."
+            ),
+            max_tokens=open_ai_tokens
         )
+        print(response.choices[0])
         return response.choices[0].text.strip() if response.choices else context
     except Exception as e:
         print(f"Error querying OpenAI for {filename}: {e}")
         return context
 
+# Function to request changes from OpenAI in chunks
 def request_changes_from_openai_in_chunks(context, filename, max_chunk_size):
-    """
-    Request changes from OpenAI by processing the content in chunks.
-    """
     chunks = split_into_chunks(context, max_chunk_size)
     modified_chunks = []
 
     for chunk in chunks:
-        try:
-            response = openai.Completion.create(
-                model=open_ai_model if len(open_ai_model) else "gpt-4o",
-                prompt=f"Giving the filename:'{filename}' and the following content:'{chunk}'\n modify the content to provide a solution for this issue:\n'{question}'\n and output the result.",
-                max_tokens=int(open_ai_tokens) or 200
-            )
-            modified_chunks.append(response.choices[0].text.strip())
-        except Exception as e:
-            print(f"Error processing chunk for {filename}: {e}")
-            modified_chunks.append(chunk)  # Use original chunk if an error occurs
+        modified_chunk = request_changes_from_openai(chunk, filename)
+        modified_chunks.append(modified_chunk)
 
     return "".join(modified_chunks)
 
-# Generate patch
+# Function to generate a patch
 def generate_patch(original, modified, filename):
     original_lines = original.splitlines(keepends=True)
     modified_lines = modified.splitlines(keepends=True)
-    d = difflib.unified_diff(original_lines, modified_lines, fromfile=filename, tofile=filename)
-    return ''.join(d)
+    diff = difflib.unified_diff(original_lines, modified_lines, fromfile=filename, tofile=filename)
+    return ''.join(diff)
 
-# Extract file paths from the issue body
-def extract_specific_file_path(text):
+# Function to extract file paths from the issue body
+def extract_specific_file_paths(text):
     regex = r"(\.?\/[\w\/.-]+\.\w+)"
     return re.findall(regex, text)
 
-# Main script
+# Main script execution
 if __name__ == "__main__":
     all_files = read_all_files_from_directory(directory)
     patches = {}
-    files_in_prompt = extract_specific_file_path(question)
+    files_in_prompt = extract_specific_file_paths(question)
     files_in_prompt_full_path = [os.path.abspath(os.path.join(directory, x.lstrip("."))) for x in files_in_prompt]
 
     for filename, content in all_files.items():
         if filename in files_in_prompt_full_path:
             print(f"Processing file: {filename}")
-            modified_content = request_changes_from_openai(content, filename) if int(chunks) == 0 else request_changes_from_openai_in_chunks(content, filename, int(chunks))
+            if chunks > 0:
+                modified_content = request_changes_from_openai_in_chunks(content, filename, chunks)
+            else:
+                modified_content = request_changes_from_openai(content, filename)
             patch = generate_patch(content, modified_content, filename)
             if patch.strip():
                 patches[filename] = patch
@@ -109,6 +125,7 @@ if __name__ == "__main__":
             for filename, patch in patches.items():
                 f.write(patch)
                 f.write('\n\n')
+        print("Patches saved to 'changes.patch'.")
     else:
         print("No patches generated. Skipping file creation.")
 
@@ -117,7 +134,11 @@ if __name__ == "__main__":
         print("Validating patch file...")
         result = subprocess.run(["git", "apply", "--check", "changes.patch"], capture_output=True, text=True)
         if result.returncode == 0:
-            subprocess.run(["git", "apply", "changes.patch"], check=True)
+            try:
+                subprocess.run(["git", "apply", "changes.patch"], check=True)
+                print("Patch applied successfully.")
+            except subprocess.CalledProcessError as e:
+                print(f"Error applying patch: {e}")
         else:
             print(f"Patch check failed: {result.stderr}")
     else:
