@@ -1,0 +1,23 @@
+name: Solve Issue with ChatGPT
+
+on:
+  issue_comment:
+    types:
+      - created
+
+jobs:
+  solve_issue:
+    if: startsWith(github.event.comment.body, '/solve')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+
+      - name: Creates a PR to solve an issue using ChatGPT
+        uses: alexanmtz/AIPR@v0.2
+        with:
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          issue_number: ${{ github.event.issue.number }}
+          model: gpt-4o
