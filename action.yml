@@ -35,7 +35,7 @@ runs:
     - name: Checkout other repository
       uses: actions/checkout@v2
       with:
-        repository: alexanmtz/AIPR
+        repository: cameronking4/AIPR
         token: ${{ github.token }} # Use the PAT stored as a secret
         path: 'scripts'
 
