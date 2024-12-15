@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Executing AIPR action
-      uses: alexanmtz/AIPR@main
+      uses: cameronking4/AIPR@main
       with:
         openai_api_key: ${{ secrets.OPENAI_API_KEY }}
         openai_tokens: 1200
