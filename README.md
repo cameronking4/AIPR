@@ -84,33 +84,29 @@ Add a section on the bottom of the file './README.md' about the author of the pr
 A sample workflow file `AIPR.yaml` inside the workflow folder could look like this:
 
 ```
-on:
-  issues:
-    types: [labeled, reopened]
-  issue_comment:
-    types: [created]
+name: Solve Issue with ChatGPT
 
-permissions:
-  contents: write
-  issues: write
-  pull-requests: write
+on:
+  issue_comment:
+    types:
+      - created
 
 jobs:
-  Creating-PR-using-AIPR:
-    if: ${{ (github.event_name == 'issues' && 
-    contains ( github.event.label.name, 'AIPR')) || 
-    (github.event_name == 'issue_comment' && 
-    github.event.issue.pull_request &&
-    contains( github.event.comment.body, 'Create PR with AIPR 🚀')) }}
+  solve_issue:
+    if: startsWith(github.event.comment.body, '/solve')
     runs-on: ubuntu-latest
+
     steps:
-    - name: Executing AIPR action
-      uses: alexanmtz/AIPR@main
-      with:
-        openai_api_key: ${{ secrets.OPENAI_API_KEY }}
-        openai_tokens: 200 #default is 200
-        target_branch: main
-        file_chunks: 10000 # split processing in chunks
+      - name: Check out repository
+        uses: actions/checkout@v3
+
+      - name: Creates a PR to solve an issue using ChatGPT
+        uses: alexanmtz/AIPR@v0.2
+        with:
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          issue_number: ${{ github.event.issue.number }}
+          model: gpt-4
 ```
 
 ## Author
